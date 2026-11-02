@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { VISIBLE, type Project } from "../data/projects";
 import { JOBS, SKILLS, CERTS } from "../data/profile";
 import { useI18n } from "../i18n";
@@ -13,37 +13,62 @@ const HERO = VISIBLE.filter(p => p.shots > 0).map(p => ({ id: p.id, src: shot(p.
 
 function HeroPhone() {
   const reduce = useReducedMotion();
-  const { L } = useI18n();
+  const { L, t } = useI18n();
+  const N = HERO.length, step = 360 / N;
+  const W = 150, R = Math.round(W / 2 / Math.tan(Math.PI / N)) + 24;
+  const angle = useMotionValue(0);
+  const spin = useSpring(angle, { stiffness: 60, damping: 18 });
+  const ring = useTransform(spin, a => `translateZ(${-R}px) rotateY(${a}deg)`);
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
+  const dragging = useRef(false);
+  useEffect(() => spin.on("change", a => setI(((Math.round(-a / step) % N) + N) % N)), [spin, step, N]);
+  const go = (d: number) => angle.set((Math.round(angle.get() / step) - d) * step);
+  const to = (k: number) => { const cur = Math.round(-angle.get() / step); let d = ((k - cur) % N + N) % N; if (d > N / 2) d -= N; go(d); };
   useEffect(() => {
     if (reduce || paused) return;
-    const id = setInterval(() => !document.hidden && setI(x => (x + 1) % HERO.length), 3200);
+    const id = setInterval(() => !document.hidden && go(1), 3000);
     return () => clearInterval(id);
   }, [reduce, paused]);
   const cur = HERO[i];
   return (
-    <div className="relative mx-auto w-full max-w-[340px]" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
+    <div className="relative mx-auto w-full max-w-[420px] select-none" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
+      role="region" aria-roledescription="carousel" aria-label={t("work.eyebrow" as never)}>
       <div className="absolute -inset-10 -z-10 rounded-full opacity-60 blur-3xl transition-colors duration-700" style={{ background: `radial-gradient(closest-side, ${cur.p.accent}55, transparent)` }} />
-      <div className="relative aspect-[9/19] rotate-[-3deg] rounded-[44px] bg-gradient-to-br from-zinc-700 to-zinc-950 p-[11px] shadow-2xl ring-1 ring-white/10 transition-transform duration-500 hover:rotate-0">
-        <div className="relative h-full w-full overflow-hidden rounded-[34px] bg-black">
-          <AnimatePresence initial={false}>
-            <motion.img key={cur.id} src={cur.src} alt="" className="absolute inset-0 h-full w-full object-cover object-top"
-              initial={{ opacity: 0, scale: 1.04 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }} />
+      <motion.div className="relative h-[360px] cursor-grab touch-pan-y active:cursor-grabbing sm:h-[400px]" style={{ perspective: 1100 }}
+        onPanStart={() => { dragging.current = true; setPaused(true); }}
+        onPan={(_, info) => angle.set(angle.get() + info.delta.x * 0.35)}
+        onPanEnd={(_, info) => { angle.set(Math.round((angle.get() + info.velocity.x * 0.08) / step) * step); setTimeout(() => { dragging.current = false; }, 50); }}>
+        <motion.div className="absolute left-1/2 top-1/2" style={{ transformStyle: "preserve-3d", transform: ring, width: 0, height: 0 }}>
+          {HERO.map((h, k) => (
+            <div key={h.id} className="absolute" style={{ width: W, height: W * 2.1, left: -W / 2, top: -W * 1.05, transform: `rotateY(${-k * step}deg) translateZ(${R}px)`, backfaceVisibility: "hidden" }}>
+              <Link to={`/apps/${h.id}`} draggable={false} tabIndex={k === i ? 0 : -1} aria-hidden={k !== i}
+                onClick={e => { if (dragging.current) e.preventDefault(); else if (k !== i) { e.preventDefault(); to(k); } }}
+                className={`block h-full w-full rounded-[28px] bg-gradient-to-br from-zinc-700 to-zinc-950 p-[7px] shadow-2xl ring-1 ring-white/10 transition-opacity duration-500 ${k === i ? "opacity-100" : "opacity-60"}`}>
+                <img src={h.src} alt={k === i ? L(h.p.nameEn ? { tr: h.p.name, en: h.p.nameEn } : h.p.name) : ""} draggable={false} className="h-full w-full rounded-[22px] bg-black object-cover object-top" />
+              </Link>
+            </div>
+          ))}
+        </motion.div>
+      </motion.div>
+      <div className="mt-2 flex items-center justify-center gap-3">
+        <button type="button" onClick={() => { setPaused(true); go(-1); }} aria-label={t("lb.prev")} className="grid h-11 w-11 cursor-pointer place-items-center rounded-full border border-line bg-surface hover:border-accent"><Icon name="chevron_left" /></button>
+        <Link to={`/apps/${cur.id}`} className="flex min-w-0 max-w-[230px] flex-1 items-center gap-3 rounded-2xl border border-line bg-surface/95 p-2.5 pr-4 shadow-xl backdrop-blur transition-colors hover:border-accent">
+          <AppIcon p={cur.p} size={36} />
+          <AnimatePresence mode="wait">
+            <motion.div key={cur.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.2 }} className="min-w-0" aria-live="polite">
+              <b className="block truncate text-sm font-semibold">{L(cur.p.nameEn ? { tr: cur.p.name, en: cur.p.nameEn } : cur.p.name)}</b>
+              <small className="block truncate font-mono text-xs text-muted">{cur.p.platforms}</small>
+            </motion.div>
           </AnimatePresence>
-        </div>
+        </Link>
+        <button type="button" onClick={() => { setPaused(true); go(1); }} aria-label={t("lb.next")} className="grid h-11 w-11 cursor-pointer place-items-center rounded-full border border-line bg-surface hover:border-accent"><Icon name="chevron_right" /></button>
       </div>
-      <Link to={`/apps/${cur.id}`} className="absolute -left-4 top-[12%] flex max-w-[250px] items-center gap-3 rounded-2xl border border-line bg-surface/95 p-3 pr-4 shadow-xl backdrop-blur transition-colors hover:border-accent sm:-left-10">
-        <AppIcon p={cur.p} size={36} />
-        <AnimatePresence mode="wait">
-          <motion.div key={cur.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.25 }} className="min-w-0">
-            <b className="block truncate text-sm font-semibold">{L(cur.p.nameEn ? { tr: cur.p.name, en: cur.p.nameEn } : cur.p.name)}</b>
-            <small className="block truncate font-mono text-xs text-muted">{cur.p.platforms}</small>
-          </motion.div>
-        </AnimatePresence>
-      </Link>
-      <div className="mt-6 flex justify-center gap-1.5" aria-hidden>
-        {HERO.map((h, k) => <span key={h.id} className={`h-1.5 rounded-full transition-all ${k === i ? "w-6 bg-accent" : "w-1.5 bg-line"}`} />)}
+      <div className="mt-4 flex flex-wrap justify-center gap-1">
+        {HERO.map((h, k) => (
+          <button key={h.id} type="button" onClick={() => { setPaused(true); to(k); }} aria-label={h.p.name} aria-current={k === i}
+            className="grid h-6 cursor-pointer place-items-center px-0.5"><span className={`block h-1.5 rounded-full transition-all ${k === i ? "w-6 bg-accent" : "w-1.5 bg-line"}`} /></button>
+        ))}
       </div>
     </div>
   );
